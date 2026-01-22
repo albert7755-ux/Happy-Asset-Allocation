@@ -9,72 +9,92 @@ st.title("🏦 金開心 - 智能投資組合配置器")
 
 # --- 2. 側邊欄：檔案上傳 ---
 st.sidebar.header("📁 資料匯入")
-uploaded_file = st.sidebar.file_uploader("請上傳報價單 (CSV 格式)", type=['csv'])
+# 修改點：這裡加入了 'xlsx' 允許 Excel 檔上傳
+uploaded_file = st.sidebar.file_uploader("請上傳報價單 (Excel 或 CSV)", type=['csv', 'xlsx'])
 
 # --- 3. 資料讀取與清洗函數 ---
 @st.cache_data
 def load_data(file):
-    try:
-        # 嘗試用 utf-8-sig 讀取 (Excel 常見格式)
-        df = pd.read_csv(file, encoding='utf-8-sig')
-    except:
-        # 如果失敗，嘗試用 big5 (中文舊格式)
-        file.seek(0) # 重置讀取指標
-        df = pd.read_csv(file, encoding='big5')
+    # 判斷副檔名來決定用什麼方式讀取
+    if file.name.endswith('.xlsx'):
+        try:
+            # 嘗試讀取 Excel，預設讀取第一個工作表
+            # 如果您的報價單在特定名稱的工作表(如"報價")，可改為 pd.read_excel(file, sheet_name='報價')
+            df = pd.read_excel(file, engine='openpyxl')
+        except Exception as e:
+            st.error(f"Excel 讀取失敗: {e}")
+            return pd.DataFrame()
+    else:
+        # CSV 讀取邏輯
+        try:
+            df = pd.read_csv(file, encoding='utf-8-sig')
+        except:
+            file.seek(0)
+            df = pd.read_csv(file, encoding='big5')
     
+    # --- 以下為共用的資料清洗邏輯 ---
+
     # 清洗資料：處理百分比與價格
     def clean_percentage(x):
         if isinstance(x, str):
-            x = x.replace(',', '').replace('%', '') # 移除逗號和%
+            x = x.replace(',', '').replace('%', '')
             try:
-                return float(x) / 100 if float(x) > 1 else float(x) # 簡單判斷是 5% 還是 0.05
+                # 簡單判斷：如果是 5.5 代表 0.055，如果是 0.055 則維持
+                # 這裡假設票面利率通常小於 100%
+                val = float(x)
+                return val / 100 if val > 1 else val
             except:
                 return 0.0
-        return float(x) if x else 0.0
+        return float(x) if pd.notnull(x) else 0.0
 
-    # 確保關鍵欄位存在與格式正確
-    # 自動尋找類似名稱的欄位，增加容錯率
+    # 取得所有欄位名稱
     cols = df.columns.tolist()
     
-    # 對應您的 CSV 欄位名稱 (根據您提供的檔案內容微調)
-    # 假設您的 CSV 欄位可能有 "當期收益率", "Offer Price", "債券名稱" 等
-    yield_col = next((c for c in cols if "當期收益" in c), None)
-    price_col = next((c for c in cols if "Offer" in c or "Price" in c), None)
-    name_col = next((c for c in cols if "名稱" in c), cols[1] if len(cols)>1 else cols[0])
-    code_col = cols[0] # 假設第一欄是代碼
+    # 智慧對應欄位 (模糊搜尋)
+    # 尋找含有關鍵字的欄位，增加對不同 Excel 格式的容錯率
+    yield_col = next((c for c in cols if "當期收益" in c or "票息" in c or "Yield" in c), None)
+    price_col = next((c for c in cols if "Offer" in c or "Price" in c or "價格" in c), None)
+    
+    # 尋找名稱欄位：通常是第二欄，或是含有"名稱"的欄位
+    name_col = next((c for c in cols if "名稱" in c or "Name" in c), cols[1] if len(cols)>1 else cols[0])
+    code_col = cols[0] # 假設第一欄永遠是代碼
 
+    # 處理收益率
     if yield_col:
         df['當期收益率_Clean'] = df[yield_col].apply(clean_percentage)
     else:
-        df['當期收益率_Clean'] = 0.0
+        df['當期收益率_Clean'] = 0.0 # 找不到欄位時預設為 0
 
+    # 處理價格
     if price_col:
         df['Offer Price_Clean'] = pd.to_numeric(df[price_col], errors='coerce').fillna(100)
     
-    # 建立顯示名稱
+    # 建立顯示名稱 (代碼 + 名稱)
     df['Display_Name'] = df[code_col].astype(str) + " - " + df[name_col].astype(str)
     
-    # 處理風險備註
-    note_col = next((c for c in cols if "備註" in c), None)
+    # 處理備註與風險 (Call / 贖回)
+    note_col = next((c for c in cols if "備註" in c or "Note" in c), None)
     df['備註_Clean'] = df[note_col].fillna('') if note_col else ''
     
     return df
 
 # --- 主程式邏輯 ---
 if uploaded_file is None:
-    st.info("👈 請從左側側邊欄上傳您的 `報價.csv` 檔案以開始使用")
+    st.info("👈 請從左側側邊欄上傳您的報價單檔案 (`.xlsx` 或 `.csv`)")
     st.markdown("""
     ### 使用說明：
-    1. 點擊左側 **「Browse files」** 按鈕。
-    2. 選擇您電腦中的報價 CSV 檔。
-    3. 系統將自動讀取並產生配置介面。
+    1. 點擊左側 **「Browse files」**。
+    2. 選擇您的 **Excel** 或 **CSV** 檔。
+    3. 系統會自動抓取第一個工作表進行分析。
     """)
-    st.stop() # 停止執行後續程式碼，直到有檔案為止
+    st.stop()
 
 try:
     df = load_data(uploaded_file)
+    if df.empty:
+        st.stop()
 except Exception as e:
-    st.error(f"檔案讀取錯誤，請確認 CSV 格式。錯誤訊息: {e}")
+    st.error(f"檔案處理發生錯誤: {e}")
     st.stop()
 
 # --- 4. 側邊欄：配置設定 ---
