@@ -215,20 +215,32 @@ n_cf = st.radio("投資幾個標的？", [2, 3, 4, 5, 6], horizontal=True, key="
 st.markdown("---")
 
 # 建立所有可選標的
-bond_options = {
-    f"{v['issuer']}（{k}）": {
+all_cf_options = {}
+
+# 1. 先放基金（按名稱排序）
+fund_only = {
+    f"【基金】{v['name']}": {"isin": k, "type": v["type"], "name": v["name"], "annual_yield": v["annual_yield"]}
+    for k, v in FUND_DB.items() if v["type"] == "FUND"
+}
+all_cf_options.update(dict(sorted(fund_only.items())))
+
+# 2. 再放ELN
+eln_only = {
+    f"【ELN】{v['name']}": {"isin": k, "type": v["type"], "name": v["name"], "annual_yield": v["annual_yield"]}
+    for k, v in FUND_DB.items() if v["type"] == "ELN"
+}
+all_cf_options.update(dict(sorted(eln_only.items())))
+
+# 3. 最後放債券（按名稱排序）
+bond_only = {
+    f"【債券】{v['issuer']}（{k}）": {
         "isin": k, "type": "BOND", "name": v["issuer"],
         "annual_yield": BOND_CURRENT_YIELD.get(k, v["coupon"] / 100)
     }
     for k, v in LOCAL_DB.items()
 }
-fund_options = {
-    f"【基金/ELN】{v['name']}": {
-        "isin": k, "type": v["type"], "name": v["name"], "annual_yield": v["annual_yield"]
-    }
-    for k, v in FUND_DB.items()
-}
-all_cf_options = dict(sorted({**bond_options, **fund_options}.items()))
+all_cf_options.update(dict(sorted(bond_only.items())))
+
 all_cf_keys = ["（請選擇）"] + list(all_cf_options.keys())
 
 # 配置各標的
