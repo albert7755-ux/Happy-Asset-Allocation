@@ -1,10 +1,14 @@
 import streamlit as st
 import plotly.graph_objects as go
+import gspread
+from google.oauth2.service_account import Credentials
+import json
 
 st.set_page_config(page_title="金開心現金流試算", layout="wide", page_icon="💰")
 
 COLORS = ["#1565c0", "#c62828", "#2e7d32", "#6a1b9a", "#e65100", "#00838f"]
 LABELS = ["A", "B", "C", "D", "E", "F"]
+MASTER_SHEET_ID = "1PVXcY12Dly5l0HlOyOAKdRzegt4K6gAAQFj1YnhiHqw"
 
 st.markdown("""
 <style>
@@ -54,9 +58,7 @@ FUND_DB = {
     "ELN（月配12%）": {"name": "ELN", "annual_yield": 0.1200, "type": "ELN"},
 }
 
-# ==========================================
 # 債券配息月份對照表
-# ==========================================
 BOND_PAY_MONTHS = {
     "US88579YBD22": (9, 3), "US084664CQ25": (8, 2), "XS1807174559": (4, 10),
     "US023135BJ40": (8, 2), "US375558BK80": (3, 9), "US037833CH12": (2, 8),
@@ -91,7 +93,6 @@ BOND_PAY_MONTHS = {
     "XS1982116136": (3, 9), "US58933YAW57": (9, 3), "US125523AK66": (3, 9),
 }
 
-# 債券當期收益率對照表
 BOND_CURRENT_YIELD = {
     "US88579YBD22": 0.0489, "US084664CQ25": 0.0484, "XS1807174559": 0.0520,
     "US023135BJ40": 0.0476, "US375558BK80": 0.0483, "US037833CH12": 0.0472,
@@ -123,61 +124,80 @@ BOND_CURRENT_YIELD = {
     "US459200KZ37": 0.0510, "US459200KV23": 0.0490, "US45866FAX24": 0.0495,
     "US872898AJ06": 0.0450, "US084664DB47": 0.0385, "US92343VGP31": 0.0388,
     "US828807DJ39": 0.0380, "US191216CQ13": 0.0420, "US254687FM36": 0.0275,
-    "XS1982116136": 0.0438, "US58933YAW57": 0.0400,
-    "US125523AK66": 0.0490,
+    "XS1982116136": 0.0438, "US58933YAW57": 0.0400, "US125523AK66": 0.0490,
 }
 
-# 債券LOCAL_DB（簡化版，只含issuer/coupon）
+# LOCAL_DB 備用
 LOCAL_DB = {
     "US88579YBD22": {"issuer": "3M 公司債1", "coupon": 4.0},
     "US084664CQ25": {"issuer": "波克夏海瑟威金融公司債1", "coupon": 4.2},
     "XS1807174559": {"issuer": "卡達政府國際債1", "coupon": 5.103},
     "US023135BJ40": {"issuer": "亞馬遜公司債1", "coupon": 4.05},
     "US375558BK80": {"issuer": "吉利德科學公司債1", "coupon": 4.15},
-    "US037833CH12": {"issuer": "蘋果公司債11", "coupon": 3.95},
-    "US002824BH26": {"issuer": "ABB金融公司債1", "coupon": 4.375},
-    "XS1508675508": {"issuer": "阿布達比主權債1", "coupon": 3.125},
-    "US02209SAV51": {"issuer": "高特利集團公司債2", "coupon": 5.375},
-    "US92343VCK89": {"issuer": "威瑞森電信公司債8", "coupon": 4.125},
-    "US594918BT09": {"issuer": "微軟公司債5", "coupon": 3.45},
-    "US125523CF53": {"issuer": "信諾公司債2", "coupon": 5.375},
-    "US20030NBU46": {"issuer": "康卡斯特公司債1", "coupon": 4.049},
+    "US037833CH12": {"issuer": "蘋果公司債6", "coupon": 4.25},
+    "US002824BH26": {"issuer": "亞培公司債2", "coupon": 4.9},
+    "XS1508675508": {"issuer": "沙烏地阿拉伯政府國際債券5", "coupon": 4.5},
+    "US02209SAV51": {"issuer": "高特利集團公司債1", "coupon": 3.875},
+    "US92343VCK89": {"issuer": "威瑞森電信公司債1", "coupon": 4.862},
+    "US594918BT09": {"issuer": "微軟公司債2", "coupon": 3.7},
+    "US125523CF53": {"issuer": "信諾公司債2", "coupon": 4.8},
+    "US20030NBU46": {"issuer": "康卡斯特公司債1", "coupon": 3.4},
     "US375558BD48": {"issuer": "吉利德科學公司債2", "coupon": 4.75},
-    "US02079KBN63": {"issuer": "Alphabet公司債4", "coupon": 3.375},
-    "US30303M8X35": {"issuer": "Meta平台公司債4", "coupon": 5.75},
-    "US747525AK99": {"issuer": "高通公司債1", "coupon": 4.65},
-    "US25468PDB94": {"issuer": "迪士尼公司債3", "coupon": 3.8},
-    "US717081DK61": {"issuer": "輝瑞公司債3", "coupon": 4.45},
-    "US449276AF17": {"issuer": "IBM公司債2", "coupon": 4.25},
-    "US02209SAR40": {"issuer": "高特利集團公司債1", "coupon": 5.375},
-    "US12572QAF28": {"issuer": "CVS健康公司債1", "coupon": 5.05},
-    "US037833AL42": {"issuer": "蘋果公司債3", "coupon": 3.0},
-    "US084670BK32": {"issuer": "波克夏海瑟威公司債1", "coupon": 4.2},
-    "US594918BZ68": {"issuer": "微軟公司債7", "coupon": 3.3},
-    "US717081EC37": {"issuer": "輝瑞公司債5", "coupon": 4.0},
-    "US035242AM81": {"issuer": "百威英博公司債1", "coupon": 4.375},
-    "US91159HJN17": {"issuer": "美國合眾銀行公司債1", "coupon": 5.85},
-    "US55608KBG94": {"issuer": "麥當勞公司債1", "coupon": 5.15},
-    "US686330AR22": {"issuer": "奧克蘇斯公司債1", "coupon": 5.0},
-    "USG91139AL26": {"issuer": "怡和控股公司債1", "coupon": 3.5},
-    "US92556HAC16": {"issuer": "維康公司債1", "coupon": 6.875},
+    "US02079KBN63": {"issuer": "Alphabet公司債5", "coupon": 5.5},
+    "US30303M8X35": {"issuer": "Meta平台公司債10", "coupon": 5.5},
+    "US747525AK99": {"issuer": "高通公司債3", "coupon": 4.8},
+    "US25468PDB94": {"issuer": "華德迪士尼公司債1", "coupon": 4.125},
+    "US717081DK61": {"issuer": "輝瑞藥廠公司債2", "coupon": 4.4},
+    "US449276AF17": {"issuer": "IBM金融公司債1", "coupon": 5.25},
+    "US02209SAR40": {"issuer": "高特利集團公司債2", "coupon": 5.375},
+    "US12572QAF28": {"issuer": "芝加哥期交所債1", "coupon": 5.3},
+    "US037833AL42": {"issuer": "蘋果公司債2", "coupon": 3.85},
+    "US084670BK32": {"issuer": "波克夏公司債1", "coupon": 4.5},
+    "US594918BZ68": {"issuer": "微軟公司債7", "coupon": 4.1},
+    "US717081EC37": {"issuer": "輝瑞藥廠公司債1", "coupon": 4.0},
+    "US035242AM81": {"issuer": "百威英博(金融)公司債2", "coupon": 4.7},
+    "US91159HJN17": {"issuer": "美國合眾銀公司債2", "coupon": 5.836},
+    "US55608KBG94": {"issuer": "麥格理集團公司債10", "coupon": 5.491},
+    "US686330AR22": {"issuer": "歐力士公司債2", "coupon": 5.2},
+    "USG91139AL26": {"issuer": "TSMC全球公司債6", "coupon": 4.625},
+    "US92556HAC16": {"issuer": "維康公司債3", "coupon": 4.95},
     "US31428XCA28": {"issuer": "聯邦快遞公司債1", "coupon": 5.25},
-    "US09062XAG88": {"issuer": "生物基因公司債1", "coupon": 3.15},
-    "US37045VAT70": {"issuer": "通用汽車公司債2", "coupon": 5.75},
-    "US854502AJ02": {"issuer": "史丹利百得公司債1", "coupon": 4.85},
-    "US00206RCU41": {"issuer": "AT&T公司債2", "coupon": 3.8},
-    "US94974BGU89": {"issuer": "威爾斯法哥公司債1", "coupon": 5.574},
-    "US172967KR13": {"issuer": "花旗集團公司債1", "coupon": 5.61},
-    "US00206RCQ39": {"issuer": "AT&T公司債1", "coupon": 5.15},
-    "US58013MFA71": {"issuer": "麥克森公司債1", "coupon": 5.45},
-    "US42824CAY57": {"issuer": "赫斯公司債1", "coupon": 6.0},
-    "US09062XAD57": {"issuer": "生物基因公司債2", "coupon": 5.2},
-    "US37045VAJ98": {"issuer": "通用汽車公司債1", "coupon": 5.4},
-    "US61747YDY86": {"issuer": "摩根士丹利公司債1", "coupon": 5.0},
-    "US94974BGE48": {"issuer": "威爾斯法哥公司債2", "coupon": 5.013},
-    "US172967HS33": {"issuer": "花旗集團公司債2", "coupon": 5.3},
-    "XS1049699926": {"issuer": "渣打銀行公司債1", "coupon": 4.3},
-    "US71568QAB32": {"issuer": "聯合健康集團債7", "coupon": 5.875},
+    "US09062XAG88": {"issuer": "生物基因公司債2", "coupon": 3.15},
+    "US37045VAT70": {"issuer": "通用汽車公司債7", "coupon": 5.95},
+    "US854502AJ02": {"issuer": "史丹利百得公司債3", "coupon": 4.85},
+    "US00206RCU41": {"issuer": "AT&T公司債12", "coupon": 5.65},
+    "US94974BGU89": {"issuer": "富國銀行公司債10", "coupon": 4.75},
+    "US172967KR13": {"issuer": "花旗集團公司債14", "coupon": 4.75},
+    "US00206RCQ39": {"issuer": "AT&T公司債5", "coupon": 4.75},
+    "US58013MFA71": {"issuer": "麥當勞公司債2", "coupon": 4.875},
+    "US42824CAY57": {"issuer": "慧與公司債1", "coupon": 6.35},
+    "US09062XAD57": {"issuer": "生物基因公司債1", "coupon": 5.2},
+    "US37045VAJ98": {"issuer": "通用汽車公司債4", "coupon": 5.2},
+    "US61747YDY86": {"issuer": "摩根士丹利債20", "coupon": 4.3},
+    "US94974BGE48": {"issuer": "富國銀行債9", "coupon": 4.65},
+    "US172967HS33": {"issuer": "花旗集團債12", "coupon": 5.3},
+    "XS1049699926": {"issuer": "渣打集團債6", "coupon": 5.7},
+    "US404280AQ21": {"issuer": "匯豐控股公司債8", "coupon": 5.25},
+    "US37045VAF76": {"issuer": "通用汽車公司債3", "coupon": 6.25},
+    "US92553PAP71": {"issuer": "維康公司債2", "coupon": 4.375},
+    "US00206RBH49": {"issuer": "AT&T公司債1", "coupon": 4.3},
+    "US71568QAB32": {"issuer": "印尼國家電力債2", "coupon": 5.25},
+    "US854502AA92": {"issuer": "史丹利百得公司債2", "coupon": 5.2},
+    "US50076QAN60": {"issuer": "卡夫亨氏公司債1", "coupon": 6.5},
+    "XS2885079702": {"issuer": "國泰人壽公司債2", "coupon": 5.3},
+    "US46625HHF01": {"issuer": "摩根大通銀行債3", "coupon": 6.4},
+    "US37045VAP58": {"issuer": "通用汽車公司債2", "coupon": 5.15},
+    "US126650CY46": {"issuer": "CVS公司債1", "coupon": 4.78},
+    "US38141GFD16": {"issuer": "美高盛公司債14", "coupon": 6.75},
+    "US00206RDR03": {"issuer": "AT&T公司債3", "coupon": 5.25},
+    "US404280AG49": {"issuer": "匯豐銀行公司債4", "coupon": 6.5},
+    "US38143YAC75": {"issuer": "美商高盛證券公司債16", "coupon": 6.45},
+    "US925524AX89": {"issuer": "維康公司債1", "coupon": 6.875},
+    "US37045VAK61": {"issuer": "通用汽車公司債1", "coupon": 6.6},
+    "XS3151416727": {"issuer": "富邦人壽(新加坡)1", "coupon": 5.45},
+    "US06051GLU12": {"issuer": "美國銀行公司債6", "coupon": 5.872},
+    "XS2852920342": {"issuer": "國泰人壽公司債1", "coupon": 5.95},
+    "US458140CA64": {"issuer": "英特爾公司債5", "coupon": 4.15},
     "US02079KBP12": {"issuer": "Alphabet公司債6", "coupon": 5.65},
     "US30303MAE21": {"issuer": "Meta平台公司債9", "coupon": 5.625},
     "US64110LBA35": {"issuer": "網飛公司債3", "coupon": 5.4},
@@ -187,8 +207,60 @@ LOCAL_DB = {
     "XS2747599509": {"issuer": "沙烏地阿拉伯債7", "coupon": 5.75},
     "US29736RAU41": {"issuer": "雅詩蘭黛公司債3", "coupon": 5.15},
     "US037833EW60": {"issuer": "蘋果公司債14", "coupon": 4.85},
+    "US91324PEW86": {"issuer": "聯合健康集團債9", "coupon": 5.05},
+    "US532457CG18": {"issuer": "禮來公司債1", "coupon": 4.875},
+    "US91324PES74": {"issuer": "聯合健康集團債5", "coupon": 5.875},
+    "US459200KZ37": {"issuer": "國際商業機器債4", "coupon": 5.1},
+    "US459200KV23": {"issuer": "國際商業機器公司債1", "coupon": 4.9},
+    "US45866FAX24": {"issuer": "洲際交易所公司債1", "coupon": 4.95},
+    "US872898AJ06": {"issuer": "TSMC公司債4", "coupon": 4.5},
+    "US084664DB47": {"issuer": "波克夏金融公司債2", "coupon": 3.85},
+    "US92343VGP31": {"issuer": "威瑞森電信公司債11", "coupon": 3.875},
+    "US828807DJ39": {"issuer": "賽門房地產集團債1", "coupon": 3.8},
+    "US191216CQ13": {"issuer": "可口可樂公司債2", "coupon": 4.2},
+    "US254687FM36": {"issuer": "迪士尼公司債2", "coupon": 2.75},
+    "XS1982116136": {"issuer": "沙烏地阿拉伯石油公司債4", "coupon": 4.375},
+    "US58933YAW57": {"issuer": "默克藥廠公司債1", "coupon": 4.0},
     "US125523AK66": {"issuer": "信諾公司債1", "coupon": 4.9},
 }
+
+# ==========================================
+# 從 bond_master 讀取債券名稱
+# ==========================================
+@st.cache_data(ttl=3600)
+def load_bond_names_from_master():
+    """從 bond_master 讀取 ISIN→債券名稱，失敗則用 LOCAL_DB"""
+    try:
+        creds_info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+        creds = Credentials.from_service_account_info(
+            creds_info,
+            scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"]
+        )
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(MASTER_SHEET_ID)
+        ws = sh.get_worksheet(0)
+        rows = ws.get_all_records()
+        result = {}
+        import csv as _csv
+        for row in rows:
+            keys = list(row.keys())
+            if len(keys) == 1 and ',' in keys[0]:
+                col_names = list(next(_csv.reader([keys[0]])))
+                values = list(next(_csv.reader([str(list(row.values())[0])])))
+                row = dict(zip([c.strip() for c in col_names], [v.strip() for v in values]))
+            isin = str(row.get("ISIN/代碼", "")).strip()
+            name = str(row.get("債券名稱", "")).strip()
+            if isin and name:
+                result[isin] = name
+        return result
+    except Exception:
+        return {k: v["issuer"] for k, v in LOCAL_DB.items()}
+
+def get_bond_name(isin, bond_names_from_master):
+    """優先用 bond_master 的名稱，沒有才用 LOCAL_DB"""
+    if isin in bond_names_from_master:
+        return bond_names_from_master[isin]
+    return LOCAL_DB.get(isin, {}).get("issuer", isin)
 
 def get_bond_pay_months(isin):
     return BOND_PAY_MONTHS.get(isin, (1, 7))
@@ -200,106 +272,111 @@ st.markdown("## 💰 金開心現金流試算工具")
 st.markdown("混搭債券、基金、ELN，試算每月現金流與年化配息率")
 st.markdown("---")
 
+# 載入 bond_master 名稱
+bond_names_master = load_bond_names_from_master()
+
 # 投資本金
 principal = st.number_input(
     "投資總本金（元）",
-    min_value=100000,
-    max_value=1000000000,
-    value=10000000,
-    step=1000000,
-    format="%d"
+    min_value=100000, max_value=1000000000,
+    value=10000000, step=1000000, format="%d"
 )
 
-# 選擇幾個標的
+# 選擇幾個標的（加上自訂欄位）
 n_cf = st.radio("投資幾個標的？", [2, 3, 4, 5, 6], horizontal=True, key="cf_n")
+n_custom = st.radio("另外新增幾個自訂標的？", [0, 1, 2, 3], horizontal=True, key="cf_custom_n")
 st.markdown("---")
 
 # 建立所有可選標的
 all_cf_options = {}
-
-# 1. 先放基金（按名稱排序）
 fund_only = {
     f"【基金】{v['name']}": {"isin": k, "type": v["type"], "name": v["name"], "annual_yield": v["annual_yield"]}
     for k, v in FUND_DB.items() if v["type"] == "FUND"
 }
 all_cf_options.update(dict(sorted(fund_only.items())))
-
-# 2. 再放ELN
 eln_only = {
     f"【ELN】{v['name']}": {"isin": k, "type": v["type"], "name": v["name"], "annual_yield": v["annual_yield"]}
     for k, v in FUND_DB.items() if v["type"] == "ELN"
 }
 all_cf_options.update(dict(sorted(eln_only.items())))
-
-# 3. 最後放債券（按名稱排序）
 bond_only = {
-    f"【債券】{v['issuer']}（{k}）": {
-        "isin": k, "type": "BOND", "name": v["issuer"],
-        "annual_yield": BOND_CURRENT_YIELD.get(k, v["coupon"] / 100)
+    f"【債券】{get_bond_name(k, bond_names_master)}（{k}）": {
+        "isin": k, "type": "BOND",
+        "name": get_bond_name(k, bond_names_master),
+        "annual_yield": BOND_CURRENT_YIELD.get(k, LOCAL_DB.get(k, {}).get("coupon", 5.0) / 100)
     }
-    for k, v in LOCAL_DB.items()
+    for k in LOCAL_DB.keys()
 }
 all_cf_options.update(dict(sorted(bond_only.items())))
-
 all_cf_keys = ["（請選擇）"] + list(all_cf_options.keys())
 
 # 配置各標的
 cf_items = []
 cols_cf = st.columns(n_cf)
-
 for i in range(n_cf):
     with cols_cf[i]:
         color = COLORS[i % len(COLORS)]
         label = LABELS[i]
         st.markdown(f'<span class="bond-tag" style="background:{color}">標的 {label}</span>', unsafe_allow_html=True)
-
-        selected_cf = st.selectbox(
-            "選擇標的",
-            options=all_cf_keys,
-            key=f"cf_sel_{i}"
-        )
-
+        selected_cf = st.selectbox("選擇標的", options=all_cf_keys, key=f"cf_sel_{i}")
         if selected_cf != "（請選擇）":
             item = all_cf_options[selected_cf]
-
-            # 換了標的就自動更新收益率
             if st.session_state.get(f"cf_last_sel_{i}") != selected_cf:
                 st.session_state[f"cf_yield_{i}"] = round(item["annual_yield"] * 100, 2)
                 st.session_state[f"cf_last_sel_{i}"] = selected_cf
-
-            default_pct = round(100.0 / n_cf, 1)
-            pct = st.number_input(
-                "投資比例 %",
-                min_value=0.0, max_value=100.0,
-                value=default_pct, step=1.0,
-                key=f"cf_pct_{i}", format="%.1f"
-            )
-            yield_pct = st.number_input(
-                "當期年化收益率 %（可修改）",
-                min_value=0.0, max_value=30.0,
-                step=0.01,
-                key=f"cf_yield_{i}", format="%.2f"
-            )
+            default_pct = round(100.0 / (n_cf + n_custom), 1)
+            pct = st.number_input("投資比例 %", min_value=0.0, max_value=100.0, value=default_pct, step=1.0, key=f"cf_pct_{i}", format="%.1f")
+            yield_pct = st.number_input("當期年化收益率 %（可修改）", min_value=0.0, max_value=30.0, step=0.01, key=f"cf_yield_{i}", format="%.2f")
             amt = principal * pct / 100
             annual_income = amt * yield_pct / 100
             monthly_income = annual_income / 12
-
             st.markdown(f"**投資金額：** ${amt:,.0f}")
             st.markdown(f"**預估年息：** ${annual_income:,.0f}")
             st.markdown(f"**預估月息：** ${monthly_income:,.0f}")
-
             cf_items.append({
-                "label": label,
-                "color": color,
-                "name": item["name"],
-                "type": item["type"],
-                "isin": item["isin"],
-                "pct": pct,
-                "amount": amt,
-                "yield_pct": yield_pct,
-                "annual_income": annual_income,
-                "monthly_income": monthly_income,
+                "label": label, "color": color,
+                "name": item["name"], "type": item["type"], "isin": item["isin"],
+                "pct": pct, "amount": amt, "yield_pct": yield_pct,
+                "annual_income": annual_income, "monthly_income": monthly_income,
             })
+
+# 自訂標的
+if n_custom > 0:
+    st.markdown("---")
+    st.markdown("#### ✏️ 自訂標的")
+    custom_cols = st.columns(n_custom)
+    for j in range(n_custom):
+        idx = n_cf + j
+        color = COLORS[idx % len(COLORS)]
+        label = LABELS[idx]
+        with custom_cols[j]:
+            st.markdown(f'<span class="bond-tag" style="background:{color}">自訂 {label}</span>', unsafe_allow_html=True)
+            custom_name = st.text_input("標的名稱", placeholder="例：某某公司債", key=f"custom_name_{j}")
+            custom_type = st.selectbox("類型", ["債券（半年配）", "基金/ELN（月配）"], key=f"custom_type_{j}")
+            custom_pct = st.number_input("投資比例 %", min_value=0.0, max_value=100.0, value=round(100.0/(n_cf+n_custom), 1), step=1.0, key=f"custom_pct_{j}", format="%.1f")
+            custom_yield = st.number_input("當期年化收益率 %", min_value=0.0, max_value=30.0, value=5.0, step=0.01, key=f"custom_yield_{j}", format="%.2f")
+            if "債券" in custom_type:
+                m1 = st.selectbox("配息月份1", list(range(1, 13)), index=0, key=f"custom_m1_{j}", format_func=lambda x: f"{x}月")
+                m2 = st.selectbox("配息月份2", list(range(1, 13)), index=6, key=f"custom_m2_{j}", format_func=lambda x: f"{x}月")
+                ctype = "BOND_CUSTOM"
+                cisin = f"CUSTOM_{j}"
+            else:
+                m1, m2 = 1, 7
+                ctype = "FUND"
+                cisin = f"CUSTOM_{j}"
+            if custom_name:
+                amt = principal * custom_pct / 100
+                annual_income = amt * custom_yield / 100
+                monthly_income = annual_income / 12
+                st.markdown(f"**投資金額：** ${amt:,.0f}")
+                st.markdown(f"**預估年息：** ${annual_income:,.0f}")
+                cf_items.append({
+                    "label": label, "color": color,
+                    "name": custom_name, "type": ctype, "isin": cisin,
+                    "pct": custom_pct, "amount": amt, "yield_pct": custom_yield,
+                    "annual_income": annual_income, "monthly_income": monthly_income,
+                    "custom_months": (m1, m2),
+                })
 
 # ==========================================
 # 計算總覽
@@ -309,7 +386,6 @@ if cf_items:
     total_pct = sum(x["pct"] for x in cf_items)
     total_income = sum(x["annual_income"] for x in cf_items)
     avg_yield = total_income / principal * 100 if principal > 0 else 0
-
     months = ["一月", "二月", "三月", "四月", "五月", "六月",
               "七月", "八月", "九月", "十月", "十一月", "十二月"]
     monthly_total = [0.0] * 12
@@ -322,7 +398,10 @@ if cf_items:
                 monthly_total[m - 1] += monthly_amt
                 month_details[m].append((item["label"], item["name"][:12], monthly_amt))
         else:
-            m1, m2 = get_bond_pay_months(item["isin"])
+            if "custom_months" in item:
+                m1, m2 = item["custom_months"]
+            else:
+                m1, m2 = get_bond_pay_months(item["isin"])
             semi_amt = item["annual_income"] / 2
             for m in [m1, m2]:
                 monthly_total[m - 1] += semi_amt
@@ -330,7 +409,6 @@ if cf_items:
 
     max_m_idx = monthly_total.index(max(monthly_total))
 
-    # KPI 卡片
     st.markdown(f"""
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
         <div style="flex:1;min-width:150px;background:#f0f4ff;border-radius:10px;padding:16px;text-align:center;">
@@ -362,10 +440,8 @@ if cf_items:
     </div>
     """, unsafe_allow_html=True)
 
-    # 逐月現金流明細
     st.markdown("---")
     st.subheader("📅 逐月現金流明細")
-
     cf_html = '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;border-radius:8px;overflow:hidden;">'
     cf_html += '<thead><tr>'
     cf_html += '<th style="background:#1a2744;color:white;padding:8px 12px;text-align:left;">月份</th>'
@@ -373,7 +449,6 @@ if cf_items:
         cf_html += f'<th style="background:{item["color"]};color:white;padding:8px 12px;text-align:center;">{item["label"]}. {item["name"][:8]}</th>'
     cf_html += '<th style="background:#c8a84b;color:white;padding:8px 12px;text-align:center;">當月合計</th>'
     cf_html += '</tr></thead><tbody>'
-
     for m_idx, month_name in enumerate(months):
         m = m_idx + 1
         bg = "#f0f4ff" if m_idx % 2 == 0 else "white"
@@ -384,7 +459,10 @@ if cf_items:
                 val = item["annual_income"] / 12
                 cf_html += f'<td style="padding:7px 12px;text-align:right;">${val:,.0f}</td>'
             else:
-                m1, m2 = get_bond_pay_months(item["isin"])
+                if "custom_months" in item:
+                    m1, m2 = item["custom_months"]
+                else:
+                    m1, m2 = get_bond_pay_months(item["isin"])
                 if m in [m1, m2]:
                     val = item["annual_income"] / 2
                     cf_html += f'<td style="padding:7px 12px;text-align:right;font-weight:600;color:#1565c0;">${val:,.0f}</td>'
@@ -393,7 +471,6 @@ if cf_items:
         total_m = monthly_total[m_idx]
         cf_html += f'<td style="padding:7px 12px;text-align:right;font-weight:700;color:#c8a84b;">${total_m:,.0f}</td>'
         cf_html += '</tr>'
-
     cf_html += '<tr style="background:#1a2744;">'
     cf_html += '<td style="padding:8px 12px;color:#ffd700;font-weight:700;">全年合計</td>'
     for item in cf_items:
@@ -402,47 +479,26 @@ if cf_items:
     cf_html += '</tr></tbody></table>'
     st.markdown(cf_html, unsafe_allow_html=True)
 
-    # 月現金流圖表
     st.markdown("---")
     st.subheader("📊 月現金流圖表")
     fig_cf = go.Figure()
     fig_cf.add_trace(go.Bar(
-        x=months,
-        y=monthly_total,
+        x=months, y=monthly_total,
         marker_color=[COLORS[i % len(COLORS)] for i in range(12)],
         text=[f"${v:,.0f}" for v in monthly_total],
-        textposition="outside",
-        name="當月合計"
+        textposition="outside", name="當月合計"
     ))
-    fig_cf.update_layout(
-        yaxis_title="配息金額（元）",
-        height=380,
-        plot_bgcolor="#f8f9ff",
-        paper_bgcolor="white",
-        showlegend=False,
-        margin=dict(t=20, b=40)
-    )
+    fig_cf.update_layout(yaxis_title="配息金額（元）", height=380, plot_bgcolor="#f8f9ff", paper_bgcolor="white", showlegend=False, margin=dict(t=20, b=40))
     st.plotly_chart(fig_cf, use_container_width=True)
 
-    # 投資組合配置
     st.subheader("🥧 投資組合配置")
     pie_col1, pie_col2 = st.columns(2)
     with pie_col1:
-        fig_pie = go.Figure(go.Pie(
-            labels=[f"{x['label']}. {x['name'][:10]}" for x in cf_items],
-            values=[x["amount"] for x in cf_items],
-            marker_colors=[x["color"] for x in cf_items],
-            hole=0.4
-        ))
+        fig_pie = go.Figure(go.Pie(labels=[f"{x['label']}. {x['name'][:10]}" for x in cf_items], values=[x["amount"] for x in cf_items], marker_colors=[x["color"] for x in cf_items], hole=0.4))
         fig_pie.update_layout(title="資金分配比例", height=300, margin=dict(t=40, b=0))
         st.plotly_chart(fig_pie, use_container_width=True)
     with pie_col2:
-        fig_pie2 = go.Figure(go.Pie(
-            labels=[f"{x['label']}. {x['name'][:10]}" for x in cf_items],
-            values=[x["annual_income"] for x in cf_items],
-            marker_colors=[x["color"] for x in cf_items],
-            hole=0.4
-        ))
+        fig_pie2 = go.Figure(go.Pie(labels=[f"{x['label']}. {x['name'][:10]}" for x in cf_items], values=[x["annual_income"] for x in cf_items], marker_colors=[x["color"] for x in cf_items], hole=0.4))
         fig_pie2.update_layout(title="年息貢獻比例", height=300, margin=dict(t=40, b=0))
         st.plotly_chart(fig_pie2, use_container_width=True)
 
